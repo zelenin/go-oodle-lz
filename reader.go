@@ -37,8 +37,15 @@ func (r *Reader) Read(p []byte) (int, error) {
 	}
 
 	if r.bufR == r.bufW {
+		// windows bug: decoder becomes null in later iterations
+		r.decoder = DecoderCreate(CompressorInvalid, r.outSize, nil)
+
 		r.bufR = 0
 		r.bufW = 0
+		if r.compBufR == r.compBufW {
+			r.compBufW = 0
+			r.compBufR = 0
+		}
 		if r.compBufR != r.compBufW {
 			copy(r.compBuf, r.compBuf[r.compBufR:r.compBufW])
 			r.compBufW = r.compBufW - r.compBufR
@@ -49,29 +56,31 @@ func (r *Reader) Read(p []byte) (int, error) {
 			return 0, err
 		}
 
-		out, err := DecoderDecodeSome(
-			r.decoder,
-			r.buf,
-			r.bufW,
-			int(r.outSize),
-			len(r.buf)-r.bufW,
-			r.compBuf[r.compBufR:r.compBufW],
-			FuzzSafeYes,
-			CheckCRCYes,
-			VerbosityNone,
-			DecodeUnthreaded,
-		)
-		if err != nil {
-			return 0, err
-		}
-
-		r.compBufR += int(out.CompBufUsed)
-		r.bufW += int(out.DecodedCount)
-
-		if out.DecodedCount == 0 && r.compBufR == r.compBufW {
-			err = r.fill()
+		if r.compBufW > r.compBufR {
+			out, err := DecoderDecodeSome(
+				r.decoder,
+				r.buf,
+				r.bufW,
+				int(r.outSize),
+				len(r.buf)-r.bufW,
+				r.compBuf[r.compBufR:r.compBufW],
+				FuzzSafeYes,
+				CheckCRCYes,
+				VerbosityNone,
+				DecodeUnthreaded,
+			)
 			if err != nil {
 				return 0, err
+			}
+
+			r.compBufR += int(out.CompBufUsed)
+			r.bufW += int(out.DecodedCount)
+
+			if out.DecodedCount == 0 && r.compBufR == r.compBufW {
+				err = r.fill()
+				if err != nil {
+					return 0, err
+				}
 			}
 		}
 	}
